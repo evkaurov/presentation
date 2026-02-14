@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("pres-var1", "pres-var2")]
+  [ValidateSet("pres-var1", "pres-var2", "ctc-media")]
   [string]$Variant = "pres-var1"
 )
 
@@ -9,7 +9,11 @@ $ErrorActionPreference = "Stop"
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $variantDir = Join-Path $projectRoot $Variant
 $imageDir = Join-Path $variantDir "img"
-$outputFile = Join-Path $variantDir "tbank-image-files.js"
+$outputFileName = switch ($Variant) {
+  "ctc-media" { "ctc-media-image-files.js" }
+  default { "tbank-image-files.js" }
+}
+$outputFile = Join-Path $variantDir $outputFileName
 
 if (-not (Test-Path -LiteralPath $imageDir -PathType Container)) {
   throw "Image folder not found: $imageDir"
