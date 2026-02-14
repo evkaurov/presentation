@@ -280,7 +280,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script>
     const IMAGE_FILES = Array.isArray(window.TBANK_IMAGE_FILES) ? window.TBANK_IMAGE_FILES : [];
-    const META_RE = /slide-(\d+)-(\d+)-IN-([a-z]+)-OUT-([a-z]+)/i;
+    const META_RE = /slide-(\d+)-(\d+)(?:-([a-z]+))?-IN-([a-z]+)-OUT-([a-z]+)/i;
     const SIZE_RE = /-(\d+)x(\d+)-slide-/i;
     const POSITION_RE = /-X(-?\d+)-Y(-?\d+)$/i;
     const DEFAULT_STAGE_SIZE = Object.freeze({
@@ -380,6 +380,12 @@
       return value;
     }
 
+    function normalizeBlendMode(value) {
+      const mode = String(value || "").toLowerCase();
+      if (mode === "screen") return "screen";
+      return "normal";
+    }
+
     function moveInVector(direction) {
       switch (normalizeDirection(direction, "left")) {
         case "left":
@@ -430,8 +436,9 @@
         src: `./${full}`,
         slide: Number(match[1]),
         layer: Number(match[2]),
-        inDir: String(match[3]).toLowerCase(),
-        outDir: String(match[4]).toLowerCase(),
+        blendMode: normalizeBlendMode(match[3]),
+        inDir: String(match[4]).toLowerCase(),
+        outDir: String(match[5]).toLowerCase(),
         x: position ? Number(position[1]) : 0,
         y: position ? Number(position[2]) : 0,
         stageWidth,
@@ -445,7 +452,7 @@
     function buildSlides(paths, layerSizeByPath) {
       const parsed = paths.map((path) => parseMeta(path, layerSizeByPath)).filter(Boolean);
       if (!parsed.length) {
-        throw new Error("Не удалось найти изображения формата *-slide-XX-YY-IN-*-OUT-*-X*-Y* в папке img.");
+        throw new Error("Не удалось найти изображения формата *-slide-XX-YY-(MODE)-IN-*-OUT-*-X*-Y* в папке img.");
       }
 
       const withSize = parsed.find((item) => item.stageWidth && item.stageHeight);
@@ -571,6 +578,7 @@
       img.style.top = toPercent(meta.y, meta.stageHeight);
       img.style.width = toPercent(meta.layerWidth, meta.stageWidth);
       img.style.height = toPercent(meta.layerHeight, meta.stageHeight);
+      img.style.mixBlendMode = meta.blendMode === "screen" ? "screen" : "normal";
       img.style.zIndex = String(100000 - meta.layer);
       return { meta, el: img };
     }
@@ -853,8 +861,10 @@
           const layersFromBottom = [...slide.layers].sort((a, b) => b.layer - a.layer);
           for (const layer of layersFromBottom) {
             const img = await loadPdfImage(layer.src);
+            ctx.globalCompositeOperation = layer.blendMode === "screen" ? "screen" : "source-over";
             ctx.drawImage(img, layer.x, layer.y, layer.layerWidth, layer.layerHeight);
           }
+          ctx.globalCompositeOperation = "source-over";
 
           const imageDataUrl = canvas.toDataURL("image/jpeg", 0.97);
 

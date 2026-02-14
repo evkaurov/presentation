@@ -1,9 +1,15 @@
+param(
+  [ValidateSet("pres-var1", "pres-var2")]
+  [string]$Variant = "pres-var1"
+)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
-$imageDir = Join-Path $projectRoot "pres-var1\img"
-$outputFile = Join-Path $projectRoot "pres-var1\tbank-image-files.js"
+$variantDir = Join-Path $projectRoot $Variant
+$imageDir = Join-Path $variantDir "img"
+$outputFile = Join-Path $variantDir "tbank-image-files.js"
 
 if (-not (Test-Path -LiteralPath $imageDir -PathType Container)) {
   throw "Image folder not found: $imageDir"
@@ -37,4 +43,5 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllLines($outputFile, $lines, $utf8NoBom)
 
 Write-Host "Found $($imageFiles.Count) image files."
+Write-Host "Variant: $Variant"
 Write-Host "Updated: $outputFile"
