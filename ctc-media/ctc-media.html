@@ -185,8 +185,12 @@
       top: max(12px, env(safe-area-inset-top));
       right: max(12px, env(safe-area-inset-right));
       z-index: 9700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
+    #toggle-controls-visibility,
     #download-pdf {
       padding: 10px 14px;
       border: 1px solid rgba(255, 255, 255, 0.24);
@@ -196,20 +200,49 @@
       font: 600 14px/1 "Segoe UI", "Trebuchet MS", sans-serif;
       cursor: pointer;
       backdrop-filter: blur(8px);
-      opacity: 0;
-      transform: translateY(-6px);
-      pointer-events: none;
-      transition: opacity 140ms ease, transform 140ms ease;
-    }
-
-    #download-pdf-wrap:hover #download-pdf,
-    #download-pdf:focus-visible,
-    #download-pdf[data-busy="true"] {
       opacity: 1;
       transform: translateY(0);
       pointer-events: auto;
+      transition: opacity 140ms ease, transform 140ms ease;
     }
 
+    #toggle-controls-visibility {
+      width: 42px;
+      min-width: 42px;
+      padding: 10px;
+      display: grid;
+      place-items: center;
+    }
+
+    #toggle-controls-visibility svg {
+      width: 18px;
+      height: 18px;
+      fill: currentColor;
+    }
+
+    #download-pdf-wrap[data-auto-hide="true"] #toggle-controls-visibility,
+    #download-pdf-wrap[data-auto-hide="true"] #download-pdf {
+      opacity: 0;
+    }
+
+    #download-pdf-wrap[data-auto-hide="true"]:hover #toggle-controls-visibility,
+    #download-pdf-wrap[data-auto-hide="true"]:hover #download-pdf {
+      opacity: 0.38;
+    }
+
+    #toggle-controls-visibility:focus-visible,
+    #download-pdf:focus-visible,
+    #download-pdf[data-busy="true"] {
+      opacity: 1;
+    }
+
+    #download-pdf-wrap[data-auto-hide="true"] #toggle-controls-visibility:focus-visible,
+    #download-pdf-wrap[data-auto-hide="true"] #download-pdf:focus-visible,
+    #download-pdf-wrap[data-auto-hide="true"] #download-pdf[data-busy="true"] {
+      opacity: 1;
+    }
+
+    #toggle-controls-visibility:hover,
     #download-pdf:hover {
       transform: translateY(-1px);
     }
@@ -264,7 +297,15 @@
 </head>
 <body>
   <main id="app">
-    <div id="download-pdf-wrap">
+    <div id="download-pdf-wrap" data-auto-hide="false">
+      <button id="toggle-controls-visibility" type="button" aria-label="Переключить видимость кнопок" aria-pressed="false" title="Скрывать кнопки вне наведения">
+        <svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512" x="0" y="0" viewBox="0 0 511.999 511.999" style="enable-background:new 0 0 512 512" xml:space="preserve" aria-hidden="true" focusable="false">
+          <g>
+            <path d="M508.745 246.041c-4.574-6.257-113.557-153.206-252.748-153.206S7.818 239.784 3.249 246.035a16.896 16.896 0 0 0 0 19.923c4.569 6.257 113.557 153.206 252.748 153.206s248.174-146.95 252.748-153.201a16.875 16.875 0 0 0 0-19.922zM255.997 385.406c-102.529 0-191.33-97.533-217.617-129.418 26.253-31.913 114.868-129.395 217.617-129.395 102.524 0 191.319 97.516 217.617 129.418-26.253 31.912-114.868 129.395-217.617 129.395z" fill="currentColor"></path>
+            <path d="M255.997 154.725c-55.842 0-101.275 45.433-101.275 101.275s45.433 101.275 101.275 101.275S357.272 311.842 357.272 256s-45.433-101.275-101.275-101.275zm0 168.791c-37.23 0-67.516-30.287-67.516-67.516s30.287-67.516 67.516-67.516 67.516 30.287 67.516 67.516-30.286 67.516-67.516 67.516z" fill="currentColor"></path>
+          </g>
+        </svg>
+      </button>
       <button id="download-pdf" type="button">Скачать PDF</button>
     </div>
     <section id="stage-wrap" aria-label="presentation stage">
@@ -319,6 +360,8 @@
     const stage = document.getElementById("stage");
     const pagerNode = document.getElementById("pager");
     const swipeHintNode = document.getElementById("swipe-hint");
+    const downloadPdfWrap = document.getElementById("download-pdf-wrap");
+    const toggleControlsVisibilityButton = document.getElementById("toggle-controls-visibility");
     const downloadPdfButton = document.getElementById("download-pdf");
     const loadingNode = document.getElementById("loading");
     const errorNode = document.getElementById("error");
@@ -942,7 +985,10 @@
       if (Date.now() < suppressClickUntilTs) {
         return;
       }
-      if (event.target instanceof Element && (event.target.closest("#pager") || event.target.closest("#download-pdf"))) {
+      if (
+        event.target instanceof Element &&
+        (event.target.closest("#pager") || event.target.closest("#download-pdf-wrap"))
+      ) {
         return;
       }
       const rect = stageWrap.getBoundingClientRect();
@@ -1073,6 +1119,22 @@
       downloadPdfButton.addEventListener("click", (event) => {
         event.stopPropagation();
         void exportSlidesToPdf();
+      });
+    }
+
+    function setControlsAutoHideEnabled(enabled) {
+      if (!(downloadPdfWrap instanceof HTMLElement) || !(toggleControlsVisibilityButton instanceof HTMLButtonElement)) return;
+      downloadPdfWrap.dataset.autoHide = enabled ? "true" : "false";
+      toggleControlsVisibilityButton.setAttribute("aria-pressed", enabled ? "true" : "false");
+      toggleControlsVisibilityButton.title = enabled ? "Показывать кнопки всегда" : "Скрывать кнопки вне наведения";
+    }
+
+    if (downloadPdfWrap instanceof HTMLElement && toggleControlsVisibilityButton instanceof HTMLButtonElement) {
+      setControlsAutoHideEnabled(downloadPdfWrap.dataset.autoHide === "true");
+      toggleControlsVisibilityButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const shouldEnableAutoHide = downloadPdfWrap.dataset.autoHide !== "true";
+        setControlsAutoHideEnabled(shouldEnableAutoHide);
       });
     }
 
