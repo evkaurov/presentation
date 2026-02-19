@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vid02</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+    }
+
+    .stage {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      overflow: hidden;
+    }
+
+    .circle {
+      position: absolute;
+      width: 156.25%;
+      height: 277.777778%;
+      left: -78.125%;
+      top: -38.888889%;
+      border-radius: 50%;
+      background: radial-gradient(circle at center, #323232 0%, rgba(0, 0, 0, 0) 50%);
+      animation: move-horizontal 10s cubic-bezier(0.42, 0, 0.58, 1) infinite alternate;
+    }
+
+    @keyframes move-horizontal {
+      0% {
+        left: -78.125%;
+      }
+      to {
+        left: 21.875%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <div class="circle" aria-hidden="true"></div>
+  </div>
+</body>
+</html>

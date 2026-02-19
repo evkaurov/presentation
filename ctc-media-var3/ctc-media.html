@@ -317,13 +317,16 @@
     </section>
   </main>
 
-  <script src="./ctc-media-image-files.js"></script>
+  <script src="./media-files-list.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script>
-    const IMAGE_FILES = Array.isArray(window.TBANK_IMAGE_FILES) ? window.TBANK_IMAGE_FILES : [];
-    const META_RE = /slide-(\d+)-(\d+)(?:-([a-z]+))?-IN-([a-z]+)-OUT-([a-z]+)/i;
+    const IMAGE_FILES = Array.isArray(window.PRES_IMAGE_FILES) ? window.PRES_IMAGE_FILES : [];
+    const VIDEO_FILES = Array.isArray(window.PRES_VIDEO_FILES) ? window.PRES_VIDEO_FILES : [];
+    const META_RE = /slide-(\d+)-(\d+)-([a-z0-9]+)-([a-z]+)-IN-([a-z]+)-OUT-([a-z]+)/i;
+    const LEGACY_META_RE = /slide-(\d+)-(\d+)-([a-z]+)-IN-([a-z]+)-OUT-([a-z]+)/i;
     const SIZE_RE = /-(\d+)x(\d+)-slide-/i;
     const POSITION_RE = /-X(-?\d+)-Y(-?\d+)$/i;
+    const VIDEO_LAYER_TYPE_RE = /^vid[0-9a-z_-]+$/i;
     const DEFAULT_STAGE_SIZE = Object.freeze({
       WIDTH: 3840,
       HEIGHT: 2160
@@ -393,7 +396,7 @@
       return `${(value / total) * 100}%`;
     }
 
-    function normalizeDiscoveredPath(path) {
+    function normalizeDiscoveredImagePath(path) {
       const raw = decodeURIComponent(String(path || "")).replace(/\\/g, "/").replace(/^\.\//, "");
       if (raw.startsWith("http://") || raw.startsWith("https://")) {
         try {
@@ -414,6 +417,29 @@
         return clean;
       }
       return `img/${clean.replace(/^\/+/, "")}`;
+    }
+
+    function normalizeDiscoveredVideoPath(path) {
+      const raw = decodeURIComponent(String(path || "")).replace(/\\/g, "/").replace(/^\.\//, "");
+      if (raw.startsWith("http://") || raw.startsWith("https://")) {
+        try {
+          const url = new URL(raw);
+          return url.pathname.replace(/^\/+/, "");
+        } catch {
+          return raw;
+        }
+      }
+
+      let clean = raw.replace(/^\/+/, "");
+      const nestedVidMatch = clean.match(/(?:^|\/)(vid\/.+)$/i);
+      if (nestedVidMatch) {
+        clean = nestedVidMatch[1];
+      }
+
+      if (clean.toLowerCase().startsWith("vid/")) {
+        return `vid/${clean.slice(4)}`;
+      }
+      return `vid/${clean.replace(/^\/+/, "")}`;
     }
 
     function normalizeDirection(direction, fallback) {
@@ -440,6 +466,7 @@
         case "down":
           return [0, -MOVE_DISTANCE];
         case "static":
+        case "keep":
           return [0, 0];
         default:
           return [MOVE_DISTANCE, 0];
@@ -457,45 +484,107 @@
         case "down":
           return [0, MOVE_DISTANCE];
         case "static":
+        case "keep":
           return [0, 0];
         default:
           return [MOVE_DISTANCE, 0];
       }
     }
 
-    function parseMeta(path, layerSizeByPath) {
-      const full = normalizeDiscoveredPath(path);
+    function parseLayerMetaFromName(baseName) {
+      const match = baseName.match(META_RE);
+      if (match) {
+        return {
+          slide: Number(match[1]),
+          layer: Number(match[2]),
+          layerType: String(match[3] || "Image"),
+          blendMode: String(match[4] || ""),
+          inDir: String(match[5] || ""),
+          outDir: String(match[6] || "")
+        };
+      }
+
+      const legacyMatch = baseName.match(LEGACY_META_RE);
+      if (!legacyMatch) {
+        return null;
+      }
+
+      return {
+        slide: Number(legacyMatch[1]),
+        layer: Number(legacyMatch[2]),
+        layerType: "Image",
+        blendMode: String(legacyMatch[3] || ""),
+        inDir: String(legacyMatch[4] || ""),
+        outDir: String(legacyMatch[5] || "")
+      };
+    }
+
+    function buildVideoSourcesByTag(paths) {
+      const map = new Map();
+      for (const path of paths) {
+        const full = normalizeDiscoveredVideoPath(path);
+        const fileName = full.split("/").pop() || "";
+        const tag = fileName.replace(/\.[^.]+$/, "");
+        if (!tag) continue;
+        const key = tag.toLowerCase();
+        if (!map.has(key)) {
+          map.set(key, []);
+        }
+        const src = `./${full}`;
+        if (!map.get(key).includes(src)) {
+          map.get(key).push(src);
+        }
+      }
+      return map;
+    }
+
+    function parseMeta(path, layerSizeByPath, videoSourcesByTag) {
+      const full = normalizeDiscoveredImagePath(path);
       const fileName = full.split("/").pop() || "";
       const baseName = fileName.replace(/\.[^.]+$/, "");
-      const match = baseName.match(META_RE);
-      if (!match) return null;
+      const layerMeta = parseLayerMetaFromName(baseName);
+      if (!layerMeta) return null;
 
       const size = baseName.match(SIZE_RE);
       const position = baseName.match(POSITION_RE);
       const layerSize = layerSizeByPath instanceof Map ? layerSizeByPath.get(full) : null;
       const stageWidth = size ? Number(size[1]) : DEFAULT_STAGE_SIZE.WIDTH;
       const stageHeight = size ? Number(size[2]) : DEFAULT_STAGE_SIZE.HEIGHT;
+      const layerType = String(layerMeta.layerType || "Image");
+      const layerTypeKey = layerType.toLowerCase();
+      const videoSources = VIDEO_LAYER_TYPE_RE.test(layerType)
+        ? [...(videoSourcesByTag.get(layerTypeKey) || [])]
+        : [];
+      const hasVideoSource = videoSources.length > 0;
+      const mediaKey = hasVideoSource
+        ? `video:${videoSources.map((src) => src.toLowerCase()).join("|")}`
+        : `image:${`./${full}`.toLowerCase()}`;
+
       return {
         src: `./${full}`,
-        slide: Number(match[1]),
-        layer: Number(match[2]),
-        blendMode: normalizeBlendMode(match[3]),
-        inDir: String(match[4]).toLowerCase(),
-        outDir: String(match[5]).toLowerCase(),
+        slide: layerMeta.slide,
+        layer: layerMeta.layer,
+        layerType,
+        blendMode: normalizeBlendMode(layerMeta.blendMode),
+        inDir: layerMeta.inDir.toLowerCase(),
+        outDir: layerMeta.outDir.toLowerCase(),
         x: position ? Number(position[1]) : 0,
         y: position ? Number(position[2]) : 0,
         stageWidth,
         stageHeight,
         layerWidth: layerSize?.width ?? stageWidth,
         layerHeight: layerSize?.height ?? stageHeight,
+        videoSources,
+        mediaKey,
+        mediaKind: hasVideoSource ? "video" : "image",
         fileName
       };
     }
 
-    function buildSlides(paths, layerSizeByPath) {
-      const parsed = paths.map((path) => parseMeta(path, layerSizeByPath)).filter(Boolean);
+    function buildSlides(paths, layerSizeByPath, videoSourcesByTag) {
+      const parsed = paths.map((path) => parseMeta(path, layerSizeByPath, videoSourcesByTag)).filter(Boolean);
       if (!parsed.length) {
-        throw new Error("Не удалось найти изображения формата *-slide-XX-YY-(MODE)-IN-*-OUT-*-X*-Y* в папке img.");
+        throw new Error("Не удалось найти изображения формата *-slide-XX-YY-LAYER-MODE-IN-*-OUT-*-X*-Y* в папке img.");
       }
 
       const withSize = parsed.find((item) => item.stageWidth && item.stageHeight);
@@ -522,7 +611,11 @@
     }
 
     async function discoverImageFiles() {
-      return IMAGE_FILES.map(normalizeDiscoveredPath);
+      return IMAGE_FILES.map(normalizeDiscoveredImagePath);
+    }
+
+    async function discoverVideoFiles() {
+      return VIDEO_FILES.map(normalizeDiscoveredVideoPath);
     }
 
     function buildRetrySrc(src, attempt) {
@@ -589,7 +682,7 @@
     }
 
     async function preloadImages(paths) {
-      const unique = [...new Set(paths.map(normalizeDiscoveredPath))];
+      const unique = [...new Set(paths.map(normalizeDiscoveredImagePath))];
       const layerSizeByPath = new Map();
       let loaded = 0;
       let nextIndex = 0;
@@ -612,22 +705,108 @@
       return layerSizeByPath;
     }
 
+    function detectVideoMimeType(src) {
+      const clean = String(src || "").split("?")[0].toLowerCase();
+      if (clean.endsWith(".mp4") || clean.endsWith(".m4v")) return "video/mp4";
+      if (clean.endsWith(".webm")) return "video/webm";
+      if (clean.endsWith(".ogv") || clean.endsWith(".ogg")) return "video/ogg";
+      if (clean.endsWith(".mov")) return "video/quicktime";
+      if (clean.endsWith(".mkv")) return "video/x-matroska";
+      return "";
+    }
+
+    function applyLayerStyles(el, meta) {
+      el.style.left = toPercent(meta.x, meta.stageWidth);
+      el.style.top = toPercent(meta.y, meta.stageHeight);
+      el.style.width = toPercent(meta.layerWidth, meta.stageWidth);
+      el.style.height = toPercent(meta.layerHeight, meta.stageHeight);
+      el.style.mixBlendMode = meta.blendMode === "screen" ? "screen" : "normal";
+      el.style.zIndex = String(100000 - meta.layer);
+    }
+
+    function ensureVideoPlayback(video) {
+      const playPromise = video.play();
+      if (playPromise && typeof playPromise.catch === "function") {
+        playPromise.catch(() => {});
+      }
+    }
+
     function createLayer(meta) {
+      if (meta.mediaKind === "video") {
+        const video = document.createElement("video");
+        video.className = "layer";
+        video.loop = true;
+        video.muted = true;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.preload = "auto";
+        video.setAttribute("playsinline", "");
+        video.setAttribute("webkit-playsinline", "");
+        video.setAttribute("aria-label", meta.fileName);
+
+        for (const sourceSrc of meta.videoSources) {
+          const source = document.createElement("source");
+          source.src = sourceSrc;
+          const mimeType = detectVideoMimeType(sourceSrc);
+          if (mimeType) {
+            source.type = mimeType;
+          }
+          video.appendChild(source);
+        }
+
+        applyLayerStyles(video, meta);
+        requestAnimationFrame(() => ensureVideoPlayback(video));
+        return { meta, el: video, mediaKey: meta.mediaKey };
+      }
+
       const img = document.createElement("img");
       img.className = "layer";
       img.src = meta.src;
       img.alt = meta.fileName;
-      img.style.left = toPercent(meta.x, meta.stageWidth);
-      img.style.top = toPercent(meta.y, meta.stageHeight);
-      img.style.width = toPercent(meta.layerWidth, meta.stageWidth);
-      img.style.height = toPercent(meta.layerHeight, meta.stageHeight);
-      img.style.mixBlendMode = meta.blendMode === "screen" ? "screen" : "normal";
-      img.style.zIndex = String(100000 - meta.layer);
-      return { meta, el: img };
+      applyLayerStyles(img, meta);
+      return { meta, el: img, mediaKey: meta.mediaKey };
     }
 
     function cancelElementAnimations(el) {
       el.getAnimations().forEach((anim) => anim.cancel());
+    }
+
+    function canReuseLayer(entry, targetMeta) {
+      if (!entry) return false;
+      return entry.mediaKey === targetMeta.mediaKey;
+    }
+
+    function syncKeptLayer(entry, targetMeta) {
+      cancelElementAnimations(entry.el);
+      entry.meta = targetMeta;
+      entry.mediaKey = targetMeta.mediaKey;
+      entry.el.style.opacity = "1";
+      entry.el.style.transform = "translate3d(0, 0, 0)";
+      applyLayerStyles(entry.el, targetMeta);
+      if (entry.el instanceof HTMLVideoElement) {
+        ensureVideoPlayback(entry.el);
+      }
+    }
+
+    function takeReusableActiveEntry(remainingActiveEntries, targetMeta) {
+      const exactLayerIndex = remainingActiveEntries.findIndex((entry) =>
+        entry.meta.layer === targetMeta.layer && canReuseLayer(entry, targetMeta)
+      );
+      if (exactLayerIndex >= 0) {
+        return remainingActiveEntries.splice(exactLayerIndex, 1)[0];
+      }
+
+      // Video layers should persist between slides even when layer numbers change.
+      if (targetMeta.mediaKind === "video") {
+        const sameVideoIndex = remainingActiveEntries.findIndex((entry) =>
+          canReuseLayer(entry, targetMeta)
+        );
+        if (sameVideoIndex >= 0) {
+          return remainingActiveEntries.splice(sameVideoIndex, 1)[0];
+        }
+      }
+
+      return null;
     }
 
     function hideSwipeHint() {
@@ -715,38 +894,49 @@
         }
       );
       await anim.finished.catch(() => {});
+      if (entry.el instanceof HTMLVideoElement) {
+        entry.el.pause();
+      }
       entry.el.remove();
     }
 
-    async function showSlide(slide) {
-      const orderFromBottom = [...slide.layers].sort((a, b) => b.layer - a.layer);
-      const entries = orderFromBottom.map(createLayer);
-      const staggerMs = ANIMATION_TIMING.IN_START_DELAY_MS;
+    async function transitionToSlide(slide) {
+      const targetLayers = [...slide.layers].sort((a, b) => b.layer - a.layer);
+      const remainingActiveEntries = [...activeLayers];
+      const keptEntries = [];
+      const enteringLayers = [];
 
-      for (const entry of entries) {
+      for (const targetMeta of targetLayers) {
+        const activeEntry = takeReusableActiveEntry(remainingActiveEntries, targetMeta);
+        if (activeEntry) {
+          syncKeptLayer(activeEntry, targetMeta);
+          keptEntries.push(activeEntry);
+          continue;
+        }
+        enteringLayers.push(targetMeta);
+      }
+
+      const leavingEntries = [...remainingActiveEntries].sort((a, b) => b.meta.layer - a.meta.layer);
+      const outStaggerMs = ANIMATION_TIMING.OUT_START_DELAY_MS;
+      await Promise.all(
+        leavingEntries.map((entry, index) =>
+          sleep(index * outStaggerMs).then(() => animateOut(entry))
+        )
+      );
+
+      const enteringEntries = enteringLayers.map(createLayer);
+      for (const entry of enteringEntries) {
         stage.appendChild(entry.el);
       }
 
-      // Mark slide layers as active before animations finish, so hide logic
-      // always has the full current set.
-      activeLayers = entries;
-
-      return Promise.all(
-        entries.map((entry, index) =>
-          sleep(index * staggerMs).then(() => animateIn(entry))
-        )
-      );
-    }
-
-    async function hideActiveSlide() {
-      const orderFromBottom = [...activeLayers].sort((a, b) => b.meta.layer - a.meta.layer);
-      const staggerMs = ANIMATION_TIMING.OUT_START_DELAY_MS;
+      const inStaggerMs = ANIMATION_TIMING.IN_START_DELAY_MS;
       await Promise.all(
-        orderFromBottom.map((entry, index) =>
-          sleep(index * staggerMs).then(() => animateOut(entry))
+        enteringEntries.map((entry, index) =>
+          sleep(index * inStaggerMs).then(() => animateIn(entry))
         )
       );
-      activeLayers = [];
+
+      activeLayers = [...keptEntries, ...enteringEntries].sort((a, b) => b.meta.layer - a.meta.layer);
     }
 
     async function goToSlide(targetIndex) {
@@ -762,9 +952,9 @@
       isTransitioning = true;
       try {
         while (requestedSlideIndex !== currentSlideIndex) {
-          await hideActiveSlide();
-          currentSlideIndex = requestedSlideIndex;
-          void showSlide(slides[currentSlideIndex]);
+          const target = requestedSlideIndex;
+          await transitionToSlide(slides[target]);
+          currentSlideIndex = target;
         }
       } finally {
         isTransitioning = false;
@@ -942,9 +1132,13 @@
     async function start() {
       isTransitioning = true;
       try {
-        const files = await discoverImageFiles();
+        const [files, videoFiles] = await Promise.all([
+          discoverImageFiles(),
+          discoverVideoFiles()
+        ]);
         const layerSizeByPath = await preloadImages(files);
-        slides = buildSlides(files, layerSizeByPath);
+        const videoSourcesByTag = buildVideoSourcesByTag(videoFiles);
+        slides = buildSlides(files, layerSizeByPath, videoSourcesByTag);
         if (!slides.length) {
           throw new Error("Слайды не найдены.");
         }
@@ -953,7 +1147,7 @@
         requestedSlideIndex = 0;
         renderPager();
         loadingNode.classList.add("hidden");
-        void showSlide(slides[currentSlideIndex]);
+        await transitionToSlide(slides[currentSlideIndex]);
         setTimeout(() => {
           if (currentSlideIndex === 0 && requestedSlideIndex === 0 && !isTransitioning) {
             showSwipeHintOnce();
@@ -962,7 +1156,7 @@
       } catch (error) {
         const message = error instanceof Error ? error.message : "Неизвестная ошибка";
         showError(
-          `${message}\n\nЗапускайте страницу через локальный сервер (например: python -m http.server), если браузер блокирует чтение папки img.`
+          `${message}\n\nЗапускайте страницу через локальный сервер (например: python -m http.server), если браузер блокирует чтение папок img/vid.`
         );
       } finally {
         isTransitioning = false;
