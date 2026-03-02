@@ -3,7 +3,7 @@ setlocal
 
 set "ROOT_DIR=%~dp0"
 set "TARGET_NAME=%~1"
-if not defined TARGET_NAME set "TARGET_NAME=dr-head"
+if not defined TARGET_NAME set "TARGET_NAME=nr"
 set "TARGET_DIR=%ROOT_DIR%%TARGET_NAME%"
 set "IMAGE_DIR=%TARGET_DIR%\img"
 set "MEDIA_DIR=%TARGET_DIR%\vid"
